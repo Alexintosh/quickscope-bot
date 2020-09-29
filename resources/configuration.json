@@ -10,7 +10,7 @@
     "coingeckoEthereumPriceURL": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=ethereum",
     "coingeckoEthereumPriceRequestInterval": 600000,
     "uniswapV2FactoryStartBlock" : "10000835",
-    "uniswapPairsLoadMethod" : "loadUniswapPairsByFactory",
+    "uniswapPairsLoadMethod" : "loadUniswapPairsByEvents",
     "tokenArrayChunk" : 20,
     "gasPrice" : "260",
     "dailyExpense" : "0.5",

@@ -3,9 +3,7 @@ var request = require('https');
 var Web3 = require('web3');
 var fs = require('fs');
 var gasCalculator = require('./gasCalculator');
-var DFOhub = require('dfo-hub');
 var web3 = new Web3(configuration.blockchainConnectionString);
-DFOhub(web3);
 var address = web3.eth.accounts.privateKeyToAccount(configuration.privateKey).address;
 var privateKey = Buffer.from(configuration.privateKey, 'hex');
 var Transaction = require('ethereumjs-tx');
@@ -13,6 +11,7 @@ Transaction = Transaction.Transaction || Transaction;
 var voidEthereumAddress = "0x0000000000000000000000000000000000000000";
 
 var uniswapV2Router = new web3.eth.Contract(configuration.uniswapV2RouterABI, configuration.uniswapV2RouterAddress);
+var uniswapV2Factory = new web3.eth.Contract(configuration.uniswapV2FactoryABI, configuration.uniswapV2FactoryAddress);
 
 async function start() {
     loop();
@@ -23,18 +22,21 @@ async function loop() {
         return setTimeout(loop, calculateNextDayTimeout());
     }
     var chainId = await web3.eth.net.getId();
-    var dfo = await web3.eth.dfoHub.load(configuration.dfoAddress);
-    var walletAddress = await (await dfo.proxy).methods.getMVDWalletAddress().call();
     var uniswapPairs = await loadUniswapPairsOfProgrammableTokens(chainId);
     var conveniences = [];
+    var dfoProxy = new web3.eth.Contract(configuration.DFOProxyABI, configuration.dfoProxyAddress);
+    var walletAddress = await dfoProxy.methods.getMVDWalletAddress().call();
     for(var uniswapPair of uniswapPairs) {
         conveniences.push(...(await getConveniences(walletAddress, chainId, uniswapPair, uniswapPair.token0)));
         conveniences.push(...(await getConveniences(walletAddress, chainId, uniswapPair, uniswapPair.token1)));
     }
     var amount = '0';
     for(var convenience of conveniences) {
-        var transactionCost = await sendTransaction(dfo, convenience);
-        amount = web3.utils.toBN(amount).add(web3.utils.toBN(transactionCost)).toString();
+        try {
+            amount = web3.utils.toBN(amount).add(web3.utils.toBN(await sendTransaction(dfoProxy, convenience))).toString();
+        } catch(e) {
+            console.error(e);
+        }
     }
     dumpTodayLimits(amount);
     if(hasReachTodayLimits()) {
@@ -43,7 +45,7 @@ async function loop() {
     return setTimeout(loop, configuration.dailyTimeTimeout);
 }
 
-function sendTransaction(dfo, convenience) {
+function sendTransaction(dfoProxy, convenience) {
     var deadline = numberToString((new Date().getTime() / 1000) + 1000).split('.')[0];
     return new Promise(async (ok, ko) => {
         var tx = {};
@@ -51,14 +53,14 @@ function sendTransaction(dfo, convenience) {
         nonce = web3.utils.toHex(nonce);
         tx.nonce = nonce;
         tx.from = address;
-        tx.data = (await dfo.proxy).methods.submit('quickScope', web3.eth.abi.encodeParameters(['address', 'uint256', 'address', 'address[]', 'uint256', 'uint256', 'uint256'], [voidEthereumAddress, 0, configuration.uniswapV2RouterAddress, convenience.path.map(it => it.address), convenience.amountIn, convenience.amountOut, deadline])).encodeABI();
+        tx.data = dfoProxy.methods.submit('quickScope', web3.eth.abi.encodeParameters(['address', 'uint256', 'address', 'address[]', 'uint256', 'uint256', 'uint256'], [voidEthereumAddress, 0, configuration.uniswapV2RouterAddress, convenience.path.map(it => it.address), convenience.amountIn, convenience.amountOutWithSlippage, deadline])).encodeABI();
         tx.value = "0x0";
         tx.gasLimit = web3.utils.toHex(configuration.gasLimit);
         var gasPrice = await gasCalculator();
         gasPrice = web3.utils.toWei(gasPrice, 'gwei');
         gasPrice = web3.utils.toHex(gasPrice);
         tx.gasPrice = gasPrice;
-        tx.to = (await dfo.proxy).options.address;
+        tx.to = dfoProxy.options.address;
         tx.chainId = web3.utils.toHex(await web3.eth.getChainId());
         var transaction = new Transaction(tx);
         transaction.sign(privateKey);
@@ -71,7 +73,7 @@ function sendTransaction(dfo, convenience) {
                     return setTimeout(timeout, configuration.transactionConfirmationsTimeoutMillis);
                 }
                 var doneTransaction = await web3.eth.getTransaction(transactionHash);
-                var transactionCost = numberToString(parseInt(doneTransaction.gasPrice) * doneTransaction.gas);
+                var transactionCost = numberToString(parseInt(doneTransaction.gasPrice) * receipt.gasUsed);
                 return ok(transactionCost);
             };
             setTimeout(timeout);
@@ -125,10 +127,12 @@ async function getConveniences(walletAddress, chainId, pair, selection) {
         if(difference.indexOf("-") === 0 || parseInt(difference) < priceGainPercentage) {
             continue;
         }
+        var amountOutWithSlippage = numberToString(parseInt(amountOut) - (parseInt(amountOut) * configuration.slippageCalculation));
         conveniences.push({
             amountIn,
             path,
-            amountOut
+            amountOut,
+            amountOutWithSlippage
         });
     }
     return conveniences;
@@ -153,7 +157,7 @@ async function loadUniswapPairsOfProgrammableTokens(chainId) {
     var list = {};
     for (var addresses of addressesList) {
         for (var subList of addressesList) {
-            var uniswapPairs = await loadUniswapPairs(addresses, subList);
+            var uniswapPairs = await global[configuration.uniswapPairsLoadMethod](addresses, subList);
             uniswapPairs.forEach(it => {
                 it.token0 = tokenData[web3.utils.toChecksumAddress(it.token0)];
                 it.token1 = tokenData[web3.utils.toChecksumAddress(it.token1)];
@@ -164,11 +168,11 @@ async function loadUniswapPairsOfProgrammableTokens(chainId) {
     return Object.values(list);
 }
 
-async function loadUniswapPairs(tokens, others) {
+global.loadUniswapPairsByEvents = async function loadUniswapPairsByEvents(tokens, others) {
     var pairCreatedTopic = web3.utils.sha3('PairCreated(address,address,address,uint256)');
     var logs = await web3.eth.getPastLogs({
         address: configuration.uniswapV2FactoryAddress,
-        fromBlock: '0',
+        fromBlock: configuration.uniswapV2FactoryStartBlock,
         topics: [
             pairCreatedTopic,
             tokens,
@@ -177,7 +181,7 @@ async function loadUniswapPairs(tokens, others) {
     });
     logs.push(...(await web3.eth.getPastLogs({
         address: configuration.uniswapV2FactoryAddress,
-        fromBlock: '0',
+        fromBlock: configuration.uniswapV2FactoryStartBlock,
         topics: [
             pairCreatedTopic,
             others,
@@ -194,6 +198,23 @@ async function loadUniswapPairs(tokens, others) {
         pairToken.token0 = web3.utils.toChecksumAddress(await pairToken.methods.token0().call());
         pairToken.token1 = web3.utils.toChecksumAddress(await pairToken.methods.token1().call());
         uniswapPairs[pairTokenAddress] = pairToken;
+    }
+    return Object.values(uniswapPairs);
+}
+
+global.loadUniswapPairsByFactory = async function loadUniswapPairsByFactory(tokens, others) {
+    var uniswapPairs = {};
+    for(var token of tokens) {
+        for(var other of others) {
+            var pairTokenAddress = await uniswapV2Factory.methods.getPair(web3.eth.abi.decodeParameter('address', token), web3.eth.abi.decodeParameter('address', other)).call();
+            if (pairTokenAddress === voidEthereumAddress || uniswapPairs[pairTokenAddress]) {
+                continue;
+            }
+            var pairToken = new web3.eth.Contract(configuration.uniswapV2PairABI, pairTokenAddress);
+            pairToken.token0 = web3.utils.toChecksumAddress(await pairToken.methods.token0().call());
+            pairToken.token1 = web3.utils.toChecksumAddress(await pairToken.methods.token1().call());
+            uniswapPairs[pairTokenAddress] = pairToken;
+        }
     }
     return Object.values(uniswapPairs);
 }
@@ -303,7 +324,7 @@ function dumpTodayLimits(value) {
     var key = getTodayLimitsKey();
     var limits = loadLimits();
     var todayLimits = limits[key] || {"expenses" : "0", "times" : 0};
-    todayLimits.expenses = web3.utils.toBN(todayLimits.expenses || '0').sub(web3.utils.toBN(value)).toString();
+    todayLimits.expenses = web3.utils.toBN(todayLimits.expenses || '0').add(web3.utils.toBN(value)).toString();
     todayLimits.times++;
     limits[key] = todayLimits;
     fs.writeFileSync(configuration.limitsListFile, JSON.stringify(limits, null, 4));

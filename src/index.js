@@ -38,7 +38,7 @@ async function loop() {
             console.error(e);
         }
     }
-    dumpTodayLimits(amount);
+    conveniences.length > 0 && dumpTodayLimits(amount);
     if(hasReachTodayLimits()) {
         return setTimeout(loop, configuration.dailyTimeout);
     }
@@ -46,7 +46,7 @@ async function loop() {
 }
 
 function sendTransaction(dfoProxy, convenience) {
-    var deadline = numberToString((new Date().getTime() / 1000) + 1000).split('.')[0];
+    var deadline = numberToString((new Date().getTime() / 1000) + configuration.swapDeadline).split('.')[0];
     return new Promise(async (ok, ko) => {
         var tx = {};
         var nonce = await web3.eth.getTransactionCount(address);
@@ -128,6 +128,7 @@ async function getConveniences(walletAddress, chainId, pair, selection) {
             continue;
         }
         var amountOutWithSlippage = numberToString(parseInt(amountOut) - (parseInt(amountOut) * configuration.slippageCalculation));
+        amountOutWithSlippage = numberToString(parseInt(amountIn) + (parseInt(amountIn) * configuration.slippageCalculation));
         conveniences.push({
             amountIn,
             path,
@@ -146,6 +147,8 @@ async function loadUniswapPairsOfProgrammableTokens(chainId) {
     var additionalTokens = configuration.additionalTokens ? configuration.additionalTokens.filter(it => it.chainId === chainId) : undefined;
     additionalTokens && addressesForLog.push(...additionalTokens.map(it => web3.eth.abi.encodeParameter('address', it.address)));
     additionalTokens && programmableEquities.forEach(it => tokenData[it.address = web3.utils.toChecksumAddress(it.address)] = it);
+    addressesForLog = configuration.preferredTokens ? configuration.preferredTokens.map(it => web3.eth.abi.encodeParameter('address', it)) : addressesForLog;
+
     var start = 0;
     var addressesList = [];
     while (start < addressesForLog.length) {

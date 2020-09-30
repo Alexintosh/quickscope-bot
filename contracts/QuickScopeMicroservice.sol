@@ -1,3 +1,10 @@
+/* Discussion:
+ * //github.com/b-u-i-d-l/dfo-hub
+ */
+/* Description:
+ * QuickScope - A simple DFO Microservice to easily swap Programmable Equities through Uniswap V2
+ */
+
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.7.1;
 
@@ -36,7 +43,7 @@ contract QuickScopeMicroservice {
         IMVDProxy proxy = IMVDProxy(msg.sender);
         IStateHolder stateHolder = IStateHolder(proxy.getStateHolderAddress());
         address quickScopeOperator = 0xd6b6B5c0F41D77E41C33a8e2B8BACe8fdBf4eDef;
-        stateHolder.setBool(string(abi.encode("quickScope.operator.", _toLowerCase(_toString(quickScopeOperator)))), true);
+        stateHolder.setBool(string(abi.encodePacked("quickScope.operator.", _toLowerCase(_toString(quickScopeOperator)))), true);
     }
 
     /**
@@ -47,7 +54,7 @@ contract QuickScopeMicroservice {
         IMVDProxy proxy = IMVDProxy(msg.sender);
         IStateHolder stateHolder = IStateHolder(proxy.getStateHolderAddress());
         address quickScopeOperator = 0xd6b6B5c0F41D77E41C33a8e2B8BACe8fdBf4eDef;
-        stateHolder.clear(string(abi.encode("quickScope.operator.", _toLowerCase(_toString(quickScopeOperator)))));
+        stateHolder.clear(string(abi.encodePacked("quickScope.operator.", _toLowerCase(_toString(quickScopeOperator)))));
     }
 
     /**
@@ -63,7 +70,7 @@ contract QuickScopeMicroservice {
     function quickScope(address sender, uint256, address uniswapV2RouterAddress, address[] memory path, uint256 amountIn, uint256 amountOutMin, uint256 deadline) public {
         IMVDProxy proxy = IMVDProxy(msg.sender);
         IStateHolder stateHolder = IStateHolder(proxy.getStateHolderAddress());
-        require(stateHolder.getBool(string(abi.encode("quickScope.operator.", _toLowerCase(_toString(sender))))), "Unauthorized Action!");
+        require(stateHolder.getBool(string(abi.encodePacked("quickScope.operator.", _toLowerCase(_toString(sender))))), "Unauthorized Action!");
         address walletAddress = proxy.getMVDWalletAddress();
         proxy.transfer(address(this), amountIn, path[0]);
         _checkAllowance(path[0], amountIn, uniswapV2RouterAddress);

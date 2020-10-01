@@ -40,7 +40,7 @@ async function loop() {
     }
     conveniences.length > 0 && dumpTodayLimits(amount);
     if(hasReachTodayLimits()) {
-        return setTimeout(loop, configuration.dailyTimeout);
+        return setTimeout(loop, calculateNextDayTimeout());
     }
     return setTimeout(loop, configuration.dailyTimeTimeout);
 }

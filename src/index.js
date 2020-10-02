@@ -299,6 +299,9 @@ function getTodayLimitsKey() {
 }
 
 function hasReachTodayLimits() {
+    if(configuration.unlimited) {
+        return false;
+    }
     var limit = loadTodayLimits();
     var dailyExpenseWei = web3.utils.toWei(configuration.dailyExpense, "ether");
     if(parseInt(limit.expenses) >= parseInt(dailyExpenseWei)) {
@@ -324,6 +327,9 @@ function loadLimits(key) {
 }
 
 function dumpTodayLimits(value) {
+    if(configuration.unlimited) {
+        return;
+    }
     var key = getTodayLimitsKey();
     var limits = loadLimits();
     var todayLimits = limits[key] || {"expenses" : "0", "times" : 0};
